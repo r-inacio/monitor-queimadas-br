@@ -7,9 +7,9 @@ const emit = defineEmits<{
   "update:modelValue": [value: Visao];
 }>();
 
-const opcoes: { valor: Visao; rotulo: string; icone: string }[] = [
-  { valor: "mapa", rotulo: "Mapa", icone: "🗺️" },
-  { valor: "dashboard", rotulo: "Dashboard", icone: "📊" },
+const opcoes: { valor: Visao; rotulo: string }[] = [
+  { valor: "mapa", rotulo: "Mapa" },
+  { valor: "dashboard", rotulo: "Dashboard" },
 ];
 
 function escolher(valor: Visao) {
@@ -28,7 +28,6 @@ function escolher(valor: Visao) {
       :aria-pressed="modelValue === opcao.valor"
       @click="escolher(opcao.valor)"
     >
-      <span aria-hidden="true">{{ opcao.icone }}</span>
       {{ opcao.rotulo }}
     </button>
   </div>

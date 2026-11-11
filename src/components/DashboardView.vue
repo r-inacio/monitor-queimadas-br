@@ -8,6 +8,41 @@ const props = defineProps<{ focos: Foco[]; data: string }>();
 const LIMITE_DETALHE = 100;
 const limiteDetalhe = ref(LIMITE_DETALHE);
 
+// Sigla da UF para a tabela de municípios (estado vem por extenso no CSV).
+const ufPorEstado: Record<string, string> = {
+  ACRE: "AC",
+  ALAGOAS: "AL",
+  AMAPÁ: "AP",
+  AMAZONAS: "AM",
+  BAHIA: "BA",
+  CEARÁ: "CE",
+  "DISTRITO FEDERAL": "DF",
+  "ESPÍRITO SANTO": "ES",
+  GOIÁS: "GO",
+  MARANHÃO: "MA",
+  "MATO GROSSO": "MT",
+  "MATO GROSSO DO SUL": "MS",
+  "MINAS GERAIS": "MG",
+  PARÁ: "PA",
+  PARAÍBA: "PB",
+  PARANÁ: "PR",
+  PERNAMBUCO: "PE",
+  PIAUÍ: "PI",
+  "RIO DE JANEIRO": "RJ",
+  "RIO GRANDE DO NORTE": "RN",
+  "RIO GRANDE DO SUL": "RS",
+  RONDÔNIA: "RO",
+  RORAIMA: "RR",
+  "SANTA CATARINA": "SC",
+  "SÃO PAULO": "SP",
+  SERGIPE: "SE",
+  TOCANTINS: "TO",
+};
+
+function ufDe(estado: string): string {
+  return ufPorEstado[estado.toUpperCase()] ?? estado.slice(0, 2);
+}
+
 const pctFormato = new Intl.NumberFormat("pt-BR", {
   maximumFractionDigits: 1,
 });
@@ -68,7 +103,7 @@ const porSatelite = computed(() =>
 const porMunicipio = computed(() => {
   const mapa = new Map<
     string,
-    { municipio: string; estado: string; count: number; frpMax: number | null }
+    { municipio: string; estado: string; count: number }
   >();
   for (const f of props.focos) {
     const chave = `${f.municipio}|${f.estado}`;
@@ -77,12 +112,8 @@ const porMunicipio = computed(() => {
         municipio: f.municipio || "—",
         estado: f.estado || "—",
         count: 0,
-        frpMax: null,
       };
     atual.count += 1;
-    if (f.frp != null && (atual.frpMax == null || f.frp > atual.frpMax)) {
-      atual.frpMax = f.frp;
-    }
     mapa.set(chave, atual);
   }
   return [...mapa.values()]
@@ -148,73 +179,76 @@ function exportarCsv() {
       </section>
 
       <div class="tabelas">
-        <section class="bloco" aria-label="Focos por estado">
+        <section class="bloco bloco--estado" aria-label="Focos por estado">
           <h3>Focos por estado</h3>
-          <table>
-            <thead>
-              <tr><th>Estado</th><th>Focos</th><th>% do total</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in porEstado" :key="item.label">
-                <td>{{ item.label }}</td>
-                <td>{{ item.count.toLocaleString("pt-BR") }}</td>
-                <td>{{ item.pct }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="rolagem">
+            <table>
+              <thead>
+                <tr><th>Estado</th><th>Focos</th><th>% do total</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in porEstado" :key="item.label">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.count.toLocaleString("pt-BR") }}</td>
+                  <td>{{ item.pct }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section class="bloco" aria-label="Focos por bioma">
-          <h3>Focos por bioma</h3>
-          <table>
-            <thead>
-              <tr><th>Bioma</th><th>Focos</th><th>% do total</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in porBioma" :key="item.label">
-                <td>{{ item.label }}</td>
-                <td>{{ item.count.toLocaleString("pt-BR") }}</td>
-                <td>{{ item.pct }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section class="bloco" aria-label="Municípios com mais focos">
+        <section class="bloco bloco--top15" aria-label="Municípios com mais focos">
           <h3>Top 15 municípios</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Município</th><th>Estado</th><th>Focos</th><th>FRP máx. (MW)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in porMunicipio" :key="item.municipio + item.estado">
-                <td>{{ item.municipio }}</td>
-                <td>{{ item.estado }}</td>
-                <td>{{ item.count.toLocaleString("pt-BR") }}</td>
-                <td>
-                  {{ item.frpMax == null ? "—" : item.frpMax.toFixed(1) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="rolagem">
+            <table>
+              <thead>
+                <tr><th>Município</th><th>UF</th><th>Focos</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in porMunicipio" :key="item.municipio + item.estado">
+                  <td>{{ item.municipio }}</td>
+                  <td>{{ ufDe(item.estado) }}</td>
+                  <td>{{ item.count.toLocaleString("pt-BR") }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
-        <section class="bloco" aria-label="Focos por satélite">
+        <section class="bloco bloco--ajustado" aria-label="Focos por bioma">
+          <h3>Focos por bioma</h3>
+          <div class="rolagem">
+            <table>
+              <thead>
+                <tr><th>Bioma</th><th>Focos</th><th>% do total</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in porBioma" :key="item.label">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.count.toLocaleString("pt-BR") }}</td>
+                  <td>{{ item.pct }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="bloco bloco--ajustado" aria-label="Focos por satélite">
           <h3>Focos por satélite</h3>
-          <table>
-            <thead>
-              <tr><th>Satélite</th><th>Focos</th><th>% do total</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="item in porSatelite" :key="item.label">
-                <td>{{ item.label }}</td>
-                <td>{{ item.count.toLocaleString("pt-BR") }}</td>
-                <td>{{ item.pct }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="rolagem">
+            <table>
+              <thead>
+                <tr><th>Satélite</th><th>Focos</th><th>% do total</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in porSatelite" :key="item.label">
+                  <td>{{ item.label }}</td>
+                  <td>{{ item.count.toLocaleString("pt-BR") }}</td>
+                  <td>{{ item.pct }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </div>
 
@@ -267,6 +301,9 @@ function exportarCsv() {
   height: 100%;
   overflow: auto;
   padding: 1.25rem;
+  /* Reserva espaço no fim da rolagem para o conteúdo nunca ficar
+     atrás do botão flutuante Mapa|Dashboard. */
+  padding-bottom: 58px;
   background: var(--bg);
 }
 
@@ -341,10 +378,29 @@ h2 {
 }
 
 .tabelas {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 1rem;
   margin-bottom: 1rem;
+}
+
+/* Estado estreito à esquerda; Top 15 aproveita o restante da linha. */
+.bloco--estado {
+  flex: 0 1 320px;
+  min-width: 280px;
+}
+
+.bloco--top15 {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+/* Bioma e Satélite encolhem para o tamanho dos próprios dados. */
+.bloco--ajustado {
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .bloco {
@@ -368,7 +424,10 @@ h3 {
 }
 
 .rolagem {
-  overflow-x: auto;
+  /* Altura limitada por seção: tabelas longas rolam internamente,
+     sem esticar a página inteira por cima do botão Mapa|Dashboard. */
+  overflow: auto;
+  max-height: 320px;
 }
 
 table {

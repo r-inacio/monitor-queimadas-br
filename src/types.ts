@@ -16,6 +16,7 @@ export type Foco = {
 
 export type Filtros = {
   estado: string;
+  municipio: string;
   bioma: string;
   satelite: string;
 };

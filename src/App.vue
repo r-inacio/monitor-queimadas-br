@@ -15,17 +15,35 @@ import {
 
 const hoje = new Date();
 const data = ref(toInputDate(hoje));
-const filtros = ref<Filtros>({ estado: "", bioma: "", satelite: "" });
+const filtros = ref<Filtros>({
+  estado: "",
+  municipio: "",
+  bioma: "",
+  satelite: "",
+});
 const visao = ref<Visao>("mapa");
 const focos = ref<Foco[]>([]);
 const carregando = ref(false);
 const erro = ref<string | null>(null);
 
-const focosFiltrados = computed(() =>
+// Focos sem o filtro de município: base do ranking de cidades,
+// para que a lista mostre todas as cidades mesmo com uma selecionada.
+const focosSemCidade = computed(() =>
   focos.value.filter((foco) => {
     if (filtros.value.estado && foco.estado !== filtros.value.estado) return false;
     if (filtros.value.bioma && foco.bioma !== filtros.value.bioma) return false;
     if (filtros.value.satelite && foco.satelite !== filtros.value.satelite)
+      return false;
+    return true;
+  }),
+);
+
+const focosFiltrados = computed(() =>
+  focosSemCidade.value.filter((foco) => {
+    if (
+      filtros.value.municipio &&
+      foco.municipio !== filtros.value.municipio
+    )
       return false;
     return true;
   }),
@@ -37,11 +55,23 @@ const satelites = computed(() =>
   uniqueSorted(focos.value.map((f) => f.satelite)),
 );
 const topEstados = computed(() =>
-  countBy(focosFiltrados.value.map((f) => f.estado)),
+  countBy(focosSemCidade.value.map((f) => f.estado)),
 );
 const topBiomas = computed(() =>
-  countBy(focosFiltrados.value.map((f) => f.bioma)),
+  countBy(focosSemCidade.value.map((f) => f.bioma)),
 );
+const topMunicipios = computed(() =>
+  countBy(focosSemCidade.value.map((f) => f.municipio)),
+);
+
+// Filtro pelo mapa (botão no popup do foco): restringe àquele município.
+function filtrarPorMunicipio(alvo: { municipio: string; estado: string }) {
+  filtros.value = {
+    ...filtros.value,
+    estado: alvo.estado,
+    municipio: alvo.municipio,
+  };
+}
 
 async function carregar() {
   carregando.value = true;
@@ -77,13 +107,18 @@ onMounted(carregar);
       :filtrados="focosFiltrados.length"
       :top-estados="topEstados"
       :top-biomas="topBiomas"
+      :top-municipios="topMunicipios"
       :carregando="carregando"
       :erro="erro"
       @update:data="data = $event"
       @update:filtros="filtros = $event"
     />
     <main class="stage">
-      <FireMap v-if="visao === 'mapa'" :focos="focosFiltrados" />
+      <FireMap
+        v-if="visao === 'mapa'"
+        :focos="focosFiltrados"
+        @filtrar-municipio="filtrarPorMunicipio"
+      />
       <DashboardView
         v-else
         :focos="focosFiltrados"

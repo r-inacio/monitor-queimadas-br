@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Filtros } from "../types";
 
-defineProps<{
+const props = defineProps<{
   data: string;
   filtros: Filtros;
   estados: string[];
@@ -11,6 +11,7 @@ defineProps<{
   filtrados: number;
   topEstados: { label: string; count: number }[];
   topBiomas: { label: string; count: number }[];
+  topMunicipios: { label: string; count: number }[];
   carregando: boolean;
   erro: string | null;
 }>();
@@ -22,6 +23,18 @@ const emit = defineEmits<{
 
 function patchFiltro(key: keyof Filtros, value: string, current: Filtros) {
   emit("update:filtros", { ...current, [key]: value });
+}
+
+// Trocar o estado limpa a cidade: a lista pertence ao estado escolhido.
+function patchEstado(value: string, current: Filtros) {
+  emit("update:filtros", { ...current, estado: value, municipio: "" });
+}
+
+// Clicar na cidade aplica o filtro; clicar de novo limpa.
+function escolherCidade(label: string) {
+  const proximo =
+    props.filtros.municipio === label ? "" : label;
+  emit("update:filtros", { ...props.filtros, municipio: proximo });
 }
 </script>
 
@@ -54,8 +67,7 @@ function patchFiltro(key: keyof Filtros, value: string, current: Filtros) {
       <select
         :value="filtros.estado"
         @change="
-          patchFiltro(
-            'estado',
+          patchEstado(
             ($event.target as HTMLSelectElement).value,
             filtros,
           )
@@ -67,6 +79,26 @@ function patchFiltro(key: keyof Filtros, value: string, current: Filtros) {
         </option>
       </select>
     </label>
+
+    <section class="cidades">
+      <h2>Cidades{{ filtros.estado ? ` — ${filtros.estado}` : "" }}</h2>
+      <p v-if="!filtros.estado" class="cidades__dica">
+        Escolha um estado para ver as cidades com focos.
+      </p>
+      <ul v-else class="cidades__lista">
+        <li v-for="item in topMunicipios" :key="item.label">
+          <button
+            type="button"
+            class="cidades__item"
+            :class="{ ativo: filtros.municipio === item.label }"
+            @click="escolherCidade(item.label)"
+          >
+            <span>{{ item.label }}</span>
+            <strong>{{ item.count.toLocaleString("pt-BR") }}</strong>
+          </button>
+        </li>
+      </ul>
+    </section>
 
     <label>
       Bioma
@@ -203,6 +235,65 @@ select {
 
 .status.error {
   color: var(--danger);
+}
+
+/* Lista de cidades: rolagem interna para não esticar o painel. */
+.cidades {
+  margin: 0.85rem 0;
+}
+
+.cidades h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cidades__dica {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.cidades__lista {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #10150f;
+}
+
+.cidades__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-bottom: 1px solid var(--panel-border);
+  background: transparent;
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cidades__item:last-child {
+  border-bottom: 0;
+}
+
+.cidades__item:hover {
+  background: rgb(245 158 11 / 10%);
+}
+
+.cidades__item.ativo {
+  background: var(--accent);
+  color: #1c1408;
+  font-weight: 600;
 }
 
 ul {
