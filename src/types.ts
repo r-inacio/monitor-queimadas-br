@@ -19,3 +19,5 @@ export type Filtros = {
   bioma: string;
   satelite: string;
 };
+
+export type Visao = "mapa" | "dashboard";

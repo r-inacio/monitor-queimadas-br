@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import DashboardView from "./components/DashboardView.vue";
 import FiltersPanel from "./components/FiltersPanel.vue";
 import FireMap from "./components/FireMap.vue";
-import type { Filtros, Foco } from "./types";
+import ViewToggle from "./components/ViewToggle.vue";
+import type { Filtros, Foco, Visao } from "./types";
 import {
   countBy,
   fetchFocosDiarios,
@@ -14,6 +16,7 @@ import {
 const hoje = new Date();
 const data = ref(toInputDate(hoje));
 const filtros = ref<Filtros>({ estado: "", bioma: "", satelite: "" });
+const visao = ref<Visao>("mapa");
 const focos = ref<Foco[]>([]);
 const carregando = ref(false);
 const erro = ref<string | null>(null);
@@ -45,7 +48,8 @@ async function carregar() {
   erro.value = null;
   try {
     focos.value = await fetchFocosDiarios(fromInputDate(data.value));
-    filtros.value = { estado: "", bioma: "", satelite: "" };
+    // Os filtros escolhidos no painel esquerdo são preservados ao trocar
+    // a data: a recarga respeita Estado/Bioma/Satélite já selecionados.
   } catch (cause) {
     focos.value = [];
     erro.value =
@@ -78,8 +82,14 @@ onMounted(carregar);
       @update:data="data = $event"
       @update:filtros="filtros = $event"
     />
-    <main>
-      <FireMap :focos="focosFiltrados" />
+    <main class="stage">
+      <FireMap v-if="visao === 'mapa'" :focos="focosFiltrados" />
+      <DashboardView
+        v-else
+        :focos="focosFiltrados"
+        :data="data"
+      />
+      <ViewToggle v-model="visao" />
     </main>
   </div>
 </template>
@@ -94,6 +104,7 @@ onMounted(carregar);
 main {
   min-width: 0;
   min-height: 0;
+  position: relative;
 }
 
 @media (max-width: 860px) {

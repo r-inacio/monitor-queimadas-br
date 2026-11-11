@@ -28,7 +28,10 @@ function parseNumber(value: string): number | null {
 
 export async function fetchFocosDiarios(date: Date): Promise<Foco[]> {
   const key = formatDateKey(date);
-  const path = `/inpe-dados/queimadas/queimadas/focos/csv/diario/Brasil/focos_diario_br_${key}.csv`;
+  // O servidor do INPE permite CORS aberto, então buscamos direto:
+  // funciona tanto no dev quanto na Vercel (o proxy /inpe-dados só
+  // existia no `vite dev` e devolvia 404 em produção).
+  const path = `https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil/focos_diario_br_${key}.csv`;
   const response = await fetch(path);
 
   if (!response.ok) {
@@ -70,4 +73,47 @@ export function countBy(values: string[]): { label: string; count: number }[] {
   return [...map.entries()]
     .map(([label, count]) => ({ label, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+export function focosToCsv(focos: Foco[]): string {
+  const headers = [
+    "id",
+    "lat",
+    "lon",
+    "data_hora_gmt",
+    "satelite",
+    "municipio",
+    "estado",
+    "bioma",
+    "numero_dias_sem_chuva",
+    "precipitacao",
+    "risco_fogo",
+    "frp",
+  ];
+  const escape = (value: string | number | null): string => {
+    const text = value == null ? "" : String(value);
+    return /[",;\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+  };
+  const lines = [headers.join(",")];
+  for (const f of focos) {
+    lines.push(
+      [
+        f.id,
+        f.lat,
+        f.lon,
+        f.dataHoraGmt,
+        f.satelite,
+        f.municipio,
+        f.estado,
+        f.bioma,
+        f.diasSemChuva,
+        f.precipitacao,
+        f.riscoFogo,
+        f.frp,
+      ]
+        .map(escape)
+        .join(","),
+    );
+  }
+  return lines.join("\n");
 }
