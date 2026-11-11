@@ -75,14 +75,13 @@ onMounted(() => {
 
   map = L.map(mapEl.value, {
     zoomControl: true,
+    attributionControl: false,
     minZoom: 4,
     maxBounds: limitesBrasil,
     maxBoundsViscosity: 1,
   }).setView([-11.5, -53.5], 4);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · dados INPE/Queimadas',
     maxZoom: 18,
   }).addTo(map);
 
@@ -181,7 +180,7 @@ onBeforeUnmount(() => {
 /* Legenda no canto inferior direito, sobre o mapa. */
 .legenda {
   position: absolute;
-  right: 12px;
+  right: 20px;
   bottom: 12px;
   z-index: 1000;
   max-width: 230px;

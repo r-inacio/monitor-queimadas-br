@@ -146,15 +146,15 @@ function exportarCsv() {
 <template>
   <div class="dashboard">
     <header class="dashboard__cabecalho">
-      <div>
-        <h2>Dashboard de focos de calor</h2>
-        <p>
-          {{ focos.length.toLocaleString("pt-BR") }} focos no recorte
-          atualizado
-          <template v-if="data"> — {{ data.split("-").reverse().join("/") }}</template
-          >.
-        </p>
-      </div>
+      <h2>
+        Dashboard de focos de calor
+        <span class="recorte">
+          · {{ focos.length.toLocaleString("pt-BR") }} focos no recorte
+          atualizado<template v-if="data">
+            — {{ data.split("-").reverse().join("/") }}</template
+          >
+        </span>
+      </h2>
       <button
         type="button"
         class="exportar"
@@ -299,41 +299,44 @@ function exportarCsv() {
 <style scoped>
 .dashboard {
   height: 100%;
-  overflow: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   padding: 1.25rem;
-  /* Reserva espaço no fim da rolagem para o conteúdo nunca ficar
-     atrás do botão flutuante Mapa|Dashboard. */
+  /* A linha do botão Mapa|Dashboard é o limite: nada passa dela. */
   padding-bottom: 58px;
   background: var(--bg);
 }
 
 .dashboard__cabecalho {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: wrap;
-  margin-bottom: 1rem;
+  flex: none;
 }
 
 h2 {
-  margin: 0 0 0.25rem;
+  margin: 0;
   font-size: 1.2rem;
 }
 
-.dashboard__cabecalho p {
-  margin: 0;
+.recorte {
   color: var(--muted);
   font-size: 0.9rem;
+  font-weight: 400;
 }
 
 .exportar {
-  padding: 0.5rem 0.9rem;
+  flex: none;
+  padding: 0.3rem 0.55rem;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: 7px;
   background: transparent;
   color: var(--accent);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   cursor: pointer;
 }
 
@@ -352,17 +355,17 @@ h2 {
 }
 
 .cards {
+  flex: none;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0.65rem;
-  margin-bottom: 1.25rem;
 }
 
 .card {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  padding: 0.8rem 0.9rem;
+  padding: 0.55rem 0.7rem;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 10px;
@@ -378,11 +381,11 @@ h2 {
 }
 
 .tabelas {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 1rem;
-  margin-bottom: 1rem;
 }
 
 /* Estado estreito à esquerda; Top 15 aproveita o restante da linha. */
@@ -407,12 +410,22 @@ h2 {
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 10px;
-  padding: 0.9rem 1rem;
+  padding: 0.7rem 0.8rem;
   min-width: 0;
 }
 
+/* Detalhe dos focos ocupa o espaço restante e rola internamente. */
 .bloco--cheio {
-  margin-bottom: 1.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bloco--cheio .rolagem {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 h3 {
@@ -427,7 +440,7 @@ h3 {
   /* Altura limitada por seção: tabelas longas rolam internamente,
      sem esticar a página inteira por cima do botão Mapa|Dashboard. */
   overflow: auto;
-  max-height: 320px;
+  max-height: 170px;
 }
 
 table {
@@ -475,5 +488,16 @@ tbody tr:hover {
 .mais button:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Telas pequenas ou baixas: a rolagem volta para nada ficar cortado. */
+@media (max-width: 860px), (max-height: 720px) {
+  .dashboard {
+    overflow-y: auto;
+  }
+
+  .bloco--cheio .rolagem {
+    max-height: 260px;
+  }
 }
 </style>

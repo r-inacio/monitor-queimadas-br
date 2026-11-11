@@ -36,7 +36,7 @@ function escolher(valor: Visao) {
 <style scoped>
 .view-toggle {
   position: absolute;
-  left: 12px;
+  left: 20px;
   bottom: 12px;
   z-index: 1000;
   display: inline-flex;
