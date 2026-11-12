@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { Filtros } from "../types";
 
 const props = defineProps<{
   data: string;
+  dataMinima?: string;
+  dataMaxima?: string;
   filtros: Filtros;
   estados: string[];
   biomas: string[];
@@ -19,7 +22,45 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:data": [value: string];
   "update:filtros": [value: Filtros];
+  atualizar: [];
 }>();
+
+// Dias disponíveis na janela recente, mais recente primeiro,
+// apresentados como lista fechada (data por extenso) — sem calendário.
+const formatadorLongo = new Intl.DateTimeFormat("pt-BR", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+});
+
+function dataDe(chave: string): Date {
+  const [ano, mes, dia] = chave.split("-").map(Number);
+  return new Date(ano, mes - 1, dia);
+}
+
+function chaveDe(data: Date): string {
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
+
+const diasDisponiveis = computed(() => {
+  const fim = props.dataMaxima ? dataDe(props.dataMaxima) : dataDe(props.data);
+  const inicio = props.dataMinima
+    ? dataDe(props.dataMinima)
+    : new Date(fim.getFullYear(), fim.getMonth(), fim.getDate() - 29);
+  const dias: { valor: string; rotulo: string; recente: boolean }[] = [];
+  for (let d = new Date(fim); d >= inicio; d.setDate(d.getDate() - 1)) {
+    const valor = chaveDe(d);
+    dias.push({
+      valor,
+      rotulo: formatadorLongo.format(d),
+      recente: valor === chaveDe(new Date()),
+    });
+  }
+  return dias;
+});
 
 function patchFiltro(key: keyof Filtros, value: string, current: Filtros) {
   emit("update:filtros", { ...current, [key]: value });
@@ -49,23 +90,25 @@ function escolherCidade(label: string) {
     </header>
 
     <label>
-      Data
-      <input
-        type="date"
+      Dia dos focos
+      <select
         :value="data"
-        @input="
-          emit(
-            'update:data',
-            ($event.target as HTMLInputElement).value,
-          )
+        title="Dias recentes com dados do INPE (últimos 30). Séries antigas estão no Histórico do dashboard. Filtros escolhidos são mantidos ao trocar o dia."
+        @change="
+          emit('update:data', ($event.target as HTMLSelectElement).value)
         "
-      />
+      >
+        <option v-for="dia in diasDisponiveis" :key="dia.valor" :value="dia.valor">
+          {{ dia.rotulo }}{{ dia.recente ? " (hoje)" : "" }}
+        </option>
+      </select>
     </label>
 
     <label>
       Estado
       <select
         :value="filtros.estado"
+        title="Estado federativo onde os focos foram detectados. Trocar o estado redefine a cidade escolhida."
         @change="
           patchEstado(
             ($event.target as HTMLSelectElement).value,
@@ -91,6 +134,7 @@ function escolherCidade(label: string) {
             type="button"
             class="cidades__item"
             :class="{ ativo: filtros.municipio === item.label }"
+            :title="`Clique para filtrar os focos de ${item.label}`"
             @click="escolherCidade(item.label)"
           >
             <span>{{ item.label }}</span>
@@ -104,6 +148,7 @@ function escolherCidade(label: string) {
       Bioma
       <select
         :value="filtros.bioma"
+        title="Bioma brasileiro onde o foco foi detectado (Amazônia, Cerrado, Caatinga…)."
         @change="
           patchFiltro(
             'bioma',
@@ -123,6 +168,7 @@ function escolherCidade(label: string) {
       Satélite
       <select
         :value="filtros.satelite"
+        title="Satélite do INPE que detectou o foco (GOES-19, AQUA, NOAA-20…)."
         @change="
           patchFiltro(
             'satelite',
@@ -138,12 +184,23 @@ function escolherCidade(label: string) {
       </select>
     </label>
 
-    <p v-if="carregando" class="status">Carregando CSV do INPE…</p>
-    <p v-else-if="erro" class="status error">{{ erro }}</p>
-    <p v-else class="status">
-      {{ filtrados.toLocaleString("pt-BR") }} focos filtrados de
-      {{ total.toLocaleString("pt-BR") }} no dia.
-    </p>
+    <div class="status-linha">
+      <p v-if="carregando" class="status">Carregando CSV do INPE…</p>
+      <p v-else-if="erro" class="status error">{{ erro }}</p>
+      <p v-else class="status">
+        {{ filtrados.toLocaleString("pt-BR") }} focos filtrados de
+        {{ total.toLocaleString("pt-BR") }} no dia.
+      </p>
+      <button
+        type="button"
+        class="atualizar"
+        :disabled="carregando"
+        title="Buscar novamente os dados do dia no INPE (útil quando o dia ainda está sendo atualizado pelo INPE)."
+        @click="emit('atualizar')"
+      >
+        ↻ Atualizar
+      </button>
+    </div>
 
     <section v-if="topEstados.length">
       <h2>Estados</h2>
@@ -235,6 +292,38 @@ select {
 
 .status.error {
   color: var(--danger);
+}
+
+.status-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.status-linha .status {
+  min-width: 0;
+}
+
+.atualizar {
+  flex: none;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.atualizar:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.atualizar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Lista de cidades: rolagem interna para não esticar o painel. */

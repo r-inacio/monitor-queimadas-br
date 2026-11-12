@@ -16,10 +16,93 @@ const emit = defineEmits<{
 const mapEl = ref<HTMLDivElement | null>(null);
 let map: L.Map | null = null;
 let cluster: L.MarkerClusterGroup | null = null;
+let camadaEstados: L.GeoJSON | null = null;
+let geojsonBrasil: GeoJSON.FeatureCollection | null = null;
 
 // Limites do território brasileiro: a navegação (arrastar/zoom) fica
 // presa dentro desta caixa.
 const limitesBrasil = L.latLngBounds([-34.2, -75.2], [6.0, -32.8]);
+
+function contagensPorEstado(): Record<string, number> {
+  const contagens: Record<string, number> = {};
+  for (const foco of props.focos) {
+    const estado = (foco.estado || "").trim();
+    if (!estado) continue;
+    contagens[estado] = (contagens[estado] ?? 0) + 1;
+  }
+  return contagens;
+}
+
+// Rampa dos estados: gradação apenas de vermelho, do mais claro
+// (poucos focos) ao vermelho escuro (muitos focos) — sem laranja e
+// sem bordô quase preto no limite.
+const PARADAS_COR: [number, number, number][] = [
+  [252, 165, 165], // vermelho bem claro (rosado, G=B)
+  [185, 28, 28], // vermelho escuro
+];
+
+function corDeEstado(focos: number, maximo: number): string {
+  // Estado sem focos: branco com um pouco mais de tom rosado.
+  if (!focos) return "rgb(252, 222, 220)";
+  // Escala logarítmica interpolada entre as paradas da rampa.
+  const forca = maximo ? Math.log10(focos + 1) / Math.log10(maximo + 1) : 0;
+  const t = forca * (PARADAS_COR.length - 1);
+  const i = Math.min(Math.floor(t), PARADAS_COR.length - 2);
+  const f = t - i;
+  const de = PARADAS_COR[i];
+  const para = PARADAS_COR[i + 1];
+  const rgb = de.map((v, k) => Math.round(v + (para[k] - v) * f));
+  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+}
+
+// Estiliza o mapa geral: cada estado é pintado pela quantidade de focos
+// do recorte atual (o mapa coroplético passa a ser a base do mapa).
+function estilizarEstados() {
+  if (!camadaEstados) return;
+  const contagens = contagensPorEstado();
+  const maximo = Math.max(0, ...Object.values(contagens));
+  camadaEstados.setStyle((feicao) => {
+    const nome =
+      ((feicao?.properties as { name?: string } | undefined)?.name ?? "").toUpperCase();
+    return {
+      fillColor: corDeEstado(contagens[nome] ?? 0, maximo),
+      fillOpacity: 1,
+      color: "rgb(86, 96, 80)",
+      weight: 0.75,
+    };
+  });
+}
+
+async function carregarEstados() {
+  try {
+    const resposta = await fetch("/dados/estados-brasil.geojson");
+    if (!resposta.ok) return; // sem camada estilizada: mapa continua útil
+    geojsonBrasil = (await resposta.json()) as GeoJSON.FeatureCollection;
+    if (!map) return;
+    camadaEstados = L.geoJSON(geojsonBrasil, {
+      // Painel próprio abaixo dos marcadores (overlayPane = 400).
+      pane: "estados",
+      style: () => ({
+        fillColor: corDeEstado(0, 0),
+        fillOpacity: 1,
+        color: "rgb(86, 96, 80)",
+        weight: 0.75,
+      }),
+      onEachFeature: (feicao, camadaFeicao) => {
+        const nome = (feicao.properties as { name?: string }).name ?? "";
+        camadaFeicao.bindTooltip(
+          `${nome}: ${contagensPorEstado()[nome.toUpperCase()]?.toLocaleString("pt-BR") ?? 0} foco(s) no recorte`,
+          { sticky: true },
+        );
+      },
+    }).addTo(map);
+    // A camada de estados é adicionada antes do cluster: os focos
+    // continuam por cima, e o zoom/arrasto seguem normais.
+    estilizarEstados();
+  } catch {
+    // Sem GeoJSON: mapa segue com fundo simples.
+  }
+}
 
 function frpColor(frp: number | null): string {
   if (frp == null) return "#f59e0b";
@@ -28,7 +111,7 @@ function frpColor(frp: number | null): string {
   return "#f59e0b";
 }
 
-function popupHtml(foco: Foco): string {
+function popupHtml(foco: Foco, destacado = false): string {
   const risco =
     foco.riscoFogo == null ? "—" : foco.riscoFogo.toFixed(2);
   const frp = foco.frp == null ? "—" : `${foco.frp.toFixed(1)} MW`;
@@ -38,6 +121,7 @@ function popupHtml(foco: Foco): string {
     foco.precipitacao == null ? "—" : `${foco.precipitacao.toFixed(1)} mm`;
 
   return `
+    ${destacado ? "<em><strong>★ Maior FRP do recorte</strong></em><br />" : ""}
     <strong>${foco.municipio} / ${foco.estado}</strong><br />
     Bioma: ${foco.bioma || "—"}<br />
     Satélite: ${foco.satelite}<br />
@@ -58,14 +142,25 @@ function renderMarkers(focos: Foco[]) {
   if (!cluster) return;
   cluster.clearLayers();
 
-  const markers = focos.map((foco) =>
-    L.circleMarker([foco.lat, foco.lon], {
-      radius: 5,
+  // Foco com maior FRP do recorte: destaque visual para comparação
+  // com as cores do coroplético.
+  const focoMaximo = focos.reduce<Foco | null>((maior, f) => {
+    if (f.frp == null) return maior;
+    if (!maior || (maior.frp ?? -1) < f.frp) return f;
+    return maior;
+  }, null);
+
+  const markers = focos.map((foco) => {
+    const destacado = foco === focoMaximo && foco.frp != null;
+    return L.circleMarker([foco.lat, foco.lon], {
+      radius: destacado ? 9 : 5,
+      // Contorno na própria cor do foco (como era originalmente).
       color: frpColor(foco.frp),
       weight: 1,
+      fillColor: frpColor(foco.frp),
       fillOpacity: 0.85,
-    }).bindPopup(popupHtml(foco)),
-  );
+    }).bindPopup(popupHtml(foco, destacado));
+  });
 
   cluster.addLayers(markers);
 }
@@ -77,13 +172,16 @@ onMounted(() => {
     zoomControl: true,
     attributionControl: false,
     minZoom: 4,
+    // Sem camada de tiles, o maxZoom precisa vir direto do mapa:
+    // o Leaflet usa este limite no fitBounds da camada de estados.
+    maxZoom: 18,
     maxBounds: limitesBrasil,
     maxBoundsViscosity: 1,
   }).setView([-11.5, -53.5], 4);
 
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18,
-  }).addTo(map);
+  // Sem tiles externos: o "mapa" é o desenho vetorial do Brasil
+  // (coroplético de estados) sobre o fundo da paleta do projeto.
+  // Assim só o território brasileiro aparece.
 
   cluster = L.markerClusterGroup({
     chunkedLoading: true,
@@ -91,6 +189,11 @@ onMounted(() => {
   });
   cluster.addTo(map);
   renderMarkers(props.focos);
+
+  // Painel abaixo dos marcadores para a camada de estados (coroplético).
+  map.createPane("estados");
+  map.getPane("estados")!.style.zIndex = "200";
+  void carregarEstados();
 
   // Botão "Filtrar por este município" dentro do popup do foco.
   map.on("popupopen", (event) => {
@@ -110,7 +213,10 @@ onMounted(() => {
 
 watch(
   () => props.focos,
-  (focos) => renderMarkers(focos),
+  (focos) => {
+    renderMarkers(focos);
+    estilizarEstados();
+  },
 );
 
 onBeforeUnmount(() => {
@@ -130,6 +236,12 @@ onBeforeUnmount(() => {
         <div class="legenda__linha"><i class="sw sw--bolha-verde" /> poucos focos</div>
         <div class="legenda__linha"><i class="sw sw--bolha-amarela" /> quantidade média</div>
         <div class="legenda__linha"><i class="sw sw--bolha-laranja" /> muitos focos</div>
+      </div>
+      <div class="legenda__grupo">
+        <span class="legenda__leg">Estados — focos no recorte</span>
+        <div class="legenda__linha"><i class="sw sw--estado-claro" /> poucos focos</div>
+        <div class="legenda__linha"><i class="sw sw--estado-medio" /> quantidade média</div>
+        <div class="legenda__linha"><i class="sw sw--estado-escuro" /> muitos focos</div>
       </div>
       <div class="legenda__grupo">
         <span class="legenda__leg">Focos — intensidade (FRP)</span>
@@ -156,7 +268,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-height: 0;
-  background: #0b100b;
+  background: var(--bg);
 }
 
 /* Botão de filtro dentro do popup (estilo global do Leaflet). */
@@ -175,6 +287,12 @@ onBeforeUnmount(() => {
 
 :deep(.popup-filtrar:hover) {
   background: var(--accent);
+}
+
+/* Números das bolhas de cluster: tom escuro suave sobre bolhas claras. */
+:deep(.marker-cluster span) {
+  color: rgb(62, 70, 55);
+  font-weight: 600;
 }
 
 /* Legenda no canto inferior direito, sobre o mapa. */
@@ -223,16 +341,19 @@ onBeforeUnmount(() => {
 
 .sw {
   display: inline-block;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
   flex-shrink: 0;
-  border: 1px solid rgb(0 0 0 / 30%);
+  box-shadow: 0 0 0 1px rgb(232 239 228 / 25%);
 }
 
 .sw--bolha-verde { background: rgb(181 226 140); }
 .sw--bolha-amarela { background: rgb(241 211 87); }
 .sw--bolha-laranja { background: rgb(253 156 115); }
+.sw--estado-claro { background: rgb(252 165 165); }
+.sw--estado-medio { background: rgb(219 96 96); }
+.sw--estado-escuro { background: rgb(185 28 28); }
 .sw--foco-ambar { background: #f59e0b; }
 .sw--foco-vermelho { background: #ef4444; }
 .sw--foco-escuro { background: #b91c1c; }

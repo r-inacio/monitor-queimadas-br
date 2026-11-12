@@ -1,12 +1,32 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import type { Foco } from "../types";
+import { computed, ref, watch } from "vue";
+import GraficoBarras from "./GraficoBarras.vue";
+import GraficoHistorico from "./GraficoHistorico.vue";
+import type {
+  AbaDashboard,
+  Filtros,
+  Foco,
+  RegistroHistorico,
+} from "../types";
 import { countBy, focosToCsv } from "../lib/queimadas";
 
-const props = defineProps<{ focos: Foco[]; data: string }>();
+const props = defineProps<{
+  focos: Foco[];
+  data: string;
+  filtros?: Filtros;
+}>();
 
 const LIMITE_DETALHE = 100;
 const limiteDetalhe = ref(LIMITE_DETALHE);
+
+// Abas internas do dashboard: Hoje | Gráficos | Histórico —
+// cada aba cabe em uma página, sem rolagem.
+const aba = ref<AbaDashboard>("hoje");
+const abas: { valor: AbaDashboard; rotulo: string }[] = [
+  { valor: "hoje", rotulo: "Hoje" },
+  { valor: "graficos", rotulo: "Gráficos" },
+  { valor: "historico", rotulo: "Histórico" },
+];
 
 // Sigla da UF para a tabela de municípios (estado vem por extenso no CSV).
 const ufPorEstado: Record<string, string> = {
@@ -141,6 +161,213 @@ function exportarCsv() {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+// Último foco registrado no recorte (maior data/hora GMT do dia).
+const escala = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 4 });
+
+const ultimoFoco = computed(() => {
+  let maisRecente: Foco | null = null;
+  for (const f of props.focos) {
+    if (!maisRecente || f.dataHoraGmt > maisRecente.dataHoraGmt) {
+      maisRecente = f;
+    }
+  }
+  return maisRecente;
+});
+
+// Quais blocos fazem sentido na aba Gráficos conforme o recorte:
+// com cidade → só intensidade; com estado → bioma + intensidade;
+// sem recorte → estado, bioma e intensidade.
+const blocosGraficos = computed(() => {
+  if (props.filtros?.municipio) return ["intensidade"];
+  if (props.filtros?.estado) return ["bioma", "intensidade"];
+  return ["estado", "bioma", "intensidade"];
+});
+
+// Distribuição por intensidade: contagem por faixa de FRP.
+const intensidade = computed(() => {
+  const faixas = [
+    { rotulo: "Menos de 40 MW", total: 0 },
+    { rotulo: "40 a 99 MW", total: 0 },
+    { rotulo: "100 MW ou mais", total: 0 },
+    { rotulo: "Sem FRP informado", total: 0 },
+  ];
+  for (const f of props.focos) {
+    if (f.frp == null) faixas[3].total += 1;
+    else if (f.frp < 40) faixas[0].total += 1;
+    else if (f.frp < 100) faixas[1].total += 1;
+    else faixas[2].total += 1;
+  }
+  return faixas;
+});
+
+// Série histórica conforme o recorte: cidade → município, estado →
+// estado, sem recorte → total nacional. Os agregados têm quebra por
+// estado e município (gerados a partir dos arquivos oficiais do INPE).
+const ABREVIACOES_MES = [
+  "jan", "fev", "mar", "abr", "mai", "jun",
+  "jul", "ago", "set", "out", "nov", "dez",
+];
+
+function rotuloHistorico(r: RegistroHistorico): string {
+  if (modoHistorico.value === "ano") return String(r.ano);
+  const chave = r.mes ?? "";
+  const indiceMes = Number(chave.slice(5, 7)) - 1;
+  const mes = ABREVIACOES_MES[indiceMes] ?? chave.slice(5, 7);
+  // Mês abreviado antes do ano: jan/2023.
+  return `${mes}/${chave.slice(0, 4)}`;
+}
+
+const rotulosHistorico = computed(() =>
+  registrosHistorico.value.map(rotuloHistorico),
+);
+
+const valoresHistorico = computed(() =>
+  registrosHistorico.value.map((r) => {
+    if (props.filtros?.municipio) {
+      // [contagem, frpMedio, frpMax] → contagem é o índice 0.
+      return (
+        r.municipios?.[props.filtros.estado]?.[
+          props.filtros.municipio
+        ]?.[0] ?? 0
+      );
+    }
+    if (props.filtros?.estado) {
+      return r.estados?.[props.filtros.estado] ?? 0;
+    }
+    return r.total;
+  }),
+);
+
+const tituloHistorico = computed(() => {
+  const sufixo = props.filtros?.municipio
+    ? `em ${props.filtros.municipio} (${props.filtros.estado})`
+    : props.filtros?.estado
+      ? `em ${props.filtros.estado}`
+      : "no Brasil";
+  return `Evolução ${modoHistorico.value === "ano" ? "anual" : "mensal"} de focos ${sufixo}`;
+});
+
+// Série de FRP médio por período para o recorte (cidade ou estado).
+// Sem recorte não há agregado nacional de FRP — a série fica oculta.
+const valoresFrpHistorico = computed(() => {
+  if (props.filtros?.municipio) {
+    return registrosHistorico.value.map(
+      (r) => r.municipios?.[props.filtros!.estado]?.[props.filtros!.municipio]?.[1] ?? null,
+    );
+  }
+  if (props.filtros?.estado) {
+    return registrosHistorico.value.map(
+      (r) => r.frp_estados?.[props.filtros!.estado]?.[1] ?? null,
+    );
+  }
+  return null;
+});
+
+const temFrpHistorico = computed(
+  () => !!valoresFrpHistorico.value && valoresFrpHistorico.value.some((v) => v != null),
+);
+
+const tituloFrpHistorico = computed(() =>
+  props.filtros?.municipio
+    ? `FRP médio do fogo em ${props.filtros.municipio} (MW)`
+    : `FRP médio do fogo em ${props.filtros?.estado} (MW)`,
+);
+
+// Participação da cidade no total do estado (%) por período.
+const valoresParticipacao = computed(() => {
+  if (!props.filtros?.municipio) return null;
+  return registrosHistorico.value.map((r) => {
+    const cidade = r.municipios?.[props.filtros!.estado]?.[
+      props.filtros!.municipio
+    ]?.[0];
+    const estado = r.estados?.[props.filtros!.estado] ?? 0;
+    if (!cidade || !estado) return 0;
+    return Math.round((cidade / estado) * 1000) / 10;
+  });
+});
+
+const temParticipacao = computed(
+  () => !!valoresParticipacao.value && valoresParticipacao.value.some((v) => v > 0),
+);
+
+const tituloParticipacao = computed(
+  () =>
+    `Participação de ${props.filtros?.municipio} nos focos de ${props.filtros?.estado} (%)`,
+);
+
+// Descrição do recorte ativo (estado e/ou cidade) para o contexto nas abas.
+const recorteAtivo = computed(() => {
+  const partes: string[] = [];
+  if (props.filtros?.estado) partes.push(props.filtros.estado);
+  if (props.filtros?.municipio) partes.push(props.filtros.municipio);
+  if (props.filtros?.bioma) partes.push(`bioma ${props.filtros.bioma}`);
+  if (props.filtros?.satelite) partes.push(`satélite ${props.filtros.satelite}`);
+  return partes.length
+    ? `Recorte: ${partes.join(" · ")} — ${props.focos.length.toLocaleString("pt-BR")} focos`
+    : "";
+});
+
+// Histórico nacional (1998–2025 anual; 2023–2026 mensal), agregado dos
+// dados oficiais do INPE — carregado sob demanda ao abrir a aba.
+// Anual e mensal são carregados separadamente: o que existir é exibido,
+// e o que faltar é avisado honestamente.
+const modoHistorico = ref<"ano" | "mes">("ano");
+const historicoAnual = ref<RegistroHistorico[]>([]);
+const historicoMensal = ref<RegistroHistorico[]>([]);
+const carregandoHistorico = ref(false);
+const falhaAnual = ref(false);
+const falhaMensal = ref(false);
+const historicoCarregado = ref(false);
+
+const registrosHistorico = computed(() =>
+  modoHistorico.value === "ano"
+    ? historicoAnual.value
+    : historicoMensal.value,
+);
+
+const semDadosHistorico = computed(
+  () => !historicoAnual.value.length && !historicoMensal.value.length,
+);
+
+async function carregarFonteHistorica(
+  caminho: string,
+): Promise<RegistroHistorico[]> {
+  // no-cache: revalida o cache HTTP — os agregados podem ser
+  // regenerados a qualquer momento pelo script.
+  const resposta = await fetch(caminho, { cache: "no-cache" });
+  if (!resposta.ok) {
+    throw new Error(`${caminho} (${resposta.status})`);
+  }
+  return ((await resposta.json()) as { registros: RegistroHistorico[] })
+    .registros;
+}
+
+watch(
+  [aba, historicoCarregado],
+  async ([abaAtual]) => {
+    if (abaAtual !== "historico" || historicoCarregado.value) return;
+    carregandoHistorico.value = true;
+    falhaAnual.value = false;
+    falhaMensal.value = false;
+    const resultados = await Promise.allSettled([
+      carregarFonteHistorica("/dados/historico-anual.json"),
+      carregarFonteHistorica("/dados/historico-mensal.json"),
+    ]);
+    if (resultados[0].status === "fulfilled") {
+      historicoAnual.value = resultados[0].value;
+    } else {
+      falhaAnual.value = true;
+    }
+    if (resultados[1].status === "fulfilled") {
+      historicoMensal.value = resultados[1].value;
+    } else {
+      falhaMensal.value = true;
+    }
+    carregandoHistorico.value = false;
+    historicoCarregado.value = true;
+  },
+);
 </script>
 
 <template>
@@ -165,13 +392,40 @@ function exportarCsv() {
       </button>
     </header>
 
-    <p v-if="!focos.length" class="vazio">
-      Nenhum foco para os filtros atuais. Ajuste a data, estado, bioma ou
-      satélite no painel à esquerda.
-    </p>
+    <nav class="abas" aria-label="Seções do dashboard">
+      <button
+        v-for="item in abas"
+        :key="item.valor"
+        type="button"
+        class="abas__botao"
+        :class="{ ativo: aba === item.valor }"
+        :aria-pressed="aba === item.valor"
+        @click="aba = item.valor"
+      >
+        {{ item.rotulo }}
+      </button>
+    </nav>
 
-    <template v-else>
-      <section class="cards" aria-label="Resumo">
+    <!-- ABA HOJE -->
+    <template v-if="aba === 'hoje'">
+      <p v-if="!focos.length" class="vazio">
+        Nenhum foco para os filtros atuais. Ajuste a data, estado, bioma ou
+        satélite no painel à esquerda.
+      </p>
+
+      <template v-else>
+        <p class="ultimo-foco" aria-label="Último foco registrado no recorte">
+          <strong>Último foco registrado:</strong>
+          {{ ultimoFoco?.municipio || "—" }}/{{
+            ufDe(ultimoFoco?.estado ?? "")
+          }}
+          · {{ ultimoFoco?.dataHoraGmt?.slice(11) ?? "—" }} GMT
+          · {{ ultimoFoco?.satelite || "—" }}
+          · lat {{ escala.format(ultimoFoco?.lat ?? 0) }}, lon
+          {{ escala.format(ultimoFoco?.lon ?? 0) }}
+        </p>
+
+        <section class="cards" aria-label="Resumo">
         <article v-for="item in resumo" :key="item.rotulo" class="card">
           <strong>{{ item.valor }}</strong>
           <span>{{ item.rotulo }}</span>
@@ -292,6 +546,153 @@ function exportarCsv() {
           </button>
         </p>
       </section>
+      </template>
+    </template>
+
+    <!-- ABA GRÁFICOS -->
+    <template v-else-if="aba === 'graficos'">
+      <p v-if="!focos.length" class="vazio">
+        Nenhum foco para os filtros atuais — ajuste os filtros para ver os
+        gráficos.
+      </p>
+      <template v-else>
+        <p v-if="recorteAtivo" class="ultimo-foco">{{ recorteAtivo }}</p>
+        <div class="grade-graficos">
+          <section
+            v-if="blocosGraficos.includes('estado')"
+            class="bloco bloco--grafico"
+            aria-label="Barras por estado"
+          >
+            <h3>Incidência por estado</h3>
+            <GraficoBarras
+              :rotulos="porEstado.slice(0, 10).map((i) => i.label)"
+              :valores="porEstado.slice(0, 10).map((i) => i.count)"
+              horizontal
+              altura="100%"
+            />
+          </section>
+
+          <section
+            v-if="blocosGraficos.includes('bioma')"
+            class="bloco bloco--grafico"
+            aria-label="Barras por bioma"
+          >
+            <h3>Incidência por bioma</h3>
+            <GraficoBarras
+              :rotulos="porBioma.map((i) => i.label)"
+              :valores="porBioma.map((i) => i.count)"
+              altura="100%"
+            />
+          </section>
+
+          <section
+            class="bloco bloco--grafico bloco--largo"
+            aria-label="Distribuição por intensidade"
+          >
+            <h3>Distribuição por intensidade (FRP)</h3>
+            <GraficoBarras
+              :rotulos="intensidade.map((i) => i.rotulo)"
+              :valores="intensidade.map((i) => i.total)"
+              cor="#ef4444"
+              altura="100%"
+            />
+          </section>
+        </div>
+      </template>
+    </template>
+
+    <!-- ABA HISTÓRICO -->
+    <template v-else>
+      <div class="historico">
+        <div class="historico__barra">
+          <div class="abas abas--compactas" role="group" aria-label="Fonte do histórico">
+            <button
+              type="button"
+              class="abas__botao"
+              :class="{ ativo: modoHistorico === 'ano' }"
+              @click="modoHistorico = 'ano'"
+            >
+              Anual (1998–2025)
+            </button>
+            <button
+              type="button"
+              class="abas__botao"
+              :class="{ ativo: modoHistorico === 'mes' }"
+              @click="modoHistorico = 'mes'"
+            >
+              Mensal (2023–2026)
+            </button>
+          </div>
+          <span class="historico__fonte">
+            Histórico nacional agregado dos dados oficiais do INPE —
+            independe dos filtros do dia.
+          </span>
+        </div>
+
+        <p v-if="carregandoHistorico" class="status-hist">Carregando histórico…</p>
+
+        <template v-else>
+          <p v-if="semDadosHistorico" class="status-hist">
+            Não há dados históricos disponíveis no momento. Verifique a
+            existência dos arquivos agregados do INPE
+            (<code>/dados/historico-anual.json</code> e
+            <code>/dados/historico-mensal.json</code>) e gere-os novamente com
+            <code>scripts/gerar-historico.py</code>.
+          </p>
+          <template v-else>
+            <p v-if="modoHistorico === 'ano' && falhaAnual" class="status-hist status-hist--erro">
+              Os dados do histórico anual estão indisponíveis no momento.
+            </p>
+            <p v-if="modoHistorico === 'mes' && falhaMensal" class="status-hist status-hist--erro">
+              Os dados do histórico mensal estão indisponíveis no momento.
+            </p>
+            <section
+              v-if="(modoHistorico === 'ano' && !falhaAnual) || (modoHistorico === 'mes' && !falhaMensal)"
+              class="bloco bloco--historico"
+            >
+              <h3>{{ tituloHistorico }}</h3>
+              <GraficoHistorico
+                :rotulos="rotulosHistorico"
+                :valores="valoresHistorico"
+              />
+            </section>
+
+            <div
+              v-if="temFrpHistorico || temParticipacao"
+              class="historico__extras"
+            >
+              <section
+                v-if="temFrpHistorico"
+                class="bloco"
+                aria-label="FRP médio no histórico"
+              >
+                <h3>{{ tituloFrpHistorico }}</h3>
+                <GraficoBarras
+                  :rotulos="rotulosHistorico"
+                  :valores="valoresFrpHistorico!.map((v) => v ?? 0)"
+                  tipo="line"
+                  altura="150px"
+                />
+              </section>
+
+              <section
+                v-if="temParticipacao"
+                class="bloco"
+                aria-label="Participação da cidade no estado"
+              >
+                <h3>{{ tituloParticipacao }}</h3>
+                <GraficoBarras
+                  :rotulos="rotulosHistorico"
+                  :valores="valoresParticipacao!"
+                  tipo="line"
+                  cor="#84cc16"
+                  altura="150px"
+                />
+              </section>
+            </div>
+          </template>
+        </template>
+      </div>
     </template>
   </div>
 </template>
@@ -440,7 +841,7 @@ h3 {
   /* Altura limitada por seção: tabelas longas rolam internamente,
      sem esticar a página inteira por cima do botão Mapa|Dashboard. */
   overflow: auto;
-  max-height: 170px;
+  max-height: 160px;
 }
 
 table {
@@ -498,6 +899,149 @@ tbody tr:hover {
 
   .bloco--cheio .rolagem {
     max-height: 260px;
+  }
+}
+
+/* Abas internas: Hoje | Gráficos | Histórico. */
+.abas {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  align-self: flex-start;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+}
+
+.abas--compactas {
+  padding: 2px;
+}
+
+.abas__botao {
+  padding: 0.3rem 0.8rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.abas__botao:hover {
+  color: var(--text);
+}
+
+.abas__botao.ativo {
+  background: var(--accent);
+  color: #1c1408;
+  font-weight: 600;
+}
+
+/* Último foco registrado no recorte. */
+.ultimo-foco {
+  margin: 0;
+  padding: 0.45rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.ultimo-foco strong {
+  color: var(--text);
+}
+
+/* Grade da aba Gráficos: 4 blocos em uma página. */
+.grade-graficos {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.bloco--largo {
+  grid-column: 1 / -1;
+}
+
+.bloco--grafico {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.bloco--grafico > *:not(h3) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.aviso-grafico {
+  flex: none;
+  margin: 0.35rem 0 0;
+  padding: 0.4rem 0.55rem;
+  background: rgb(245 158 11 / 10%);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* Aba Histórico. */
+.historico {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.historico__barra {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.historico__fonte {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.status-hist {
+  color: var(--muted);
+}
+
+.status-hist--erro {
+  color: var(--danger);
+}
+
+.bloco--historico {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.bloco--historico > *:not(h3) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Gráficos extras do histórico (FRP médio, participação no estado). */
+.historico__extras {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 860px) {
+  .grade-graficos {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(4, minmax(220px, 1fr));
   }
 }
 </style>

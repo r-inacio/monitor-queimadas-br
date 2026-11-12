@@ -26,6 +26,27 @@ function parseNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Cache local por dia: o último carregamento bem-sucedido fica guardado
+// e é usado como fallback quando o INPE fica indisponível.
+const PREFIXO_CACHE = "focos_diario_cache_";
+
+function lerCache(key: string): Foco[] | null {
+  try {
+    const bruto = localStorage.getItem(PREFIXO_CACHE + key);
+    return bruto ? (JSON.parse(bruto) as Foco[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function gravarCache(key: string, focos: Foco[]): void {
+  try {
+    localStorage.setItem(PREFIXO_CACHE + key, JSON.stringify(focos));
+  } catch {
+    // Quota do localStorage cheia (ou modo privado): cache dispensável.
+  }
+}
+
 export async function fetchFocosDiarios(date: Date): Promise<Foco[]> {
   const key = formatDateKey(date);
   // O servidor do INPE permite CORS aberto, então buscamos direto:
@@ -35,13 +56,15 @@ export async function fetchFocosDiarios(date: Date): Promise<Foco[]> {
   const response = await fetch(path);
 
   if (!response.ok) {
+    const cache = lerCache(key);
+    if (cache) return cache; // fallback: último dado válido do dia
     throw new Error(
       `Não foi possível carregar o CSV do dia ${toInputDate(date)} (${response.status}).`,
     );
   }
 
   const text = await response.text();
-  return parseCsv(text).map((row) => ({
+  const focos = parseCsv(text).map((row) => ({
     id: row.id,
     lat: Number(row.lat),
     lon: Number(row.lon),
@@ -56,6 +79,9 @@ export async function fetchFocosDiarios(date: Date): Promise<Foco[]> {
     bioma: row.bioma,
     frp: parseNumber(row.frp),
   })).filter((foco) => Number.isFinite(foco.lat) && Number.isFinite(foco.lon));
+
+  gravarCache(key, focos);
+  return focos;
 }
 
 export function uniqueSorted(values: string[]): string[] {

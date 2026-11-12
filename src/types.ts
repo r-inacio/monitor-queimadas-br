@@ -22,3 +22,18 @@ export type Filtros = {
 };
 
 export type Visao = "mapa" | "dashboard";
+
+export type AbaDashboard = "hoje" | "graficos" | "historico";
+
+export type RegistroHistorico = {
+  ano?: number;
+  mes?: string;
+  total: number;
+  estados: Record<string, number>;
+  biomas: Record<string, number>;
+  // municipios[ESTADO][MUNICIPIO] = [contagem, frpMedio, frpMax]
+  // (frpMedio/frpMax = null quando nenhum foco tem FRP no período)
+  municipios: Record<string, Record<string, [number, number | null, number | null]>>;
+  // frp_estados[ESTADO] = [contagem, frpMedio, frpMax]
+  frp_estados: Record<string, [number, number | null, number | null]>;
+};
