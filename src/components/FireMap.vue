@@ -90,8 +90,14 @@ async function carregarEstados() {
       }),
       onEachFeature: (feicao, camadaFeicao) => {
         const nome = (feicao.properties as { name?: string }).name ?? "";
+        // Função (não string): o total é recalculado a cada hover, com os
+        // focos do recorte atual — antes o texto congelava em 0.
         camadaFeicao.bindTooltip(
-          `${nome}: ${contagensPorEstado()[nome.toUpperCase()]?.toLocaleString("pt-BR") ?? 0} foco(s) no recorte`,
+          () => {
+            const total = contagensPorEstado()[nome.toUpperCase()] ?? 0;
+            const rotulo = total === 1 ? "foco" : "focos";
+            return `${nome}: ${total.toLocaleString("pt-BR")} ${rotulo} no recorte`;
+          },
           { sticky: true },
         );
       },
