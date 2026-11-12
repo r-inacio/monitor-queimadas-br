@@ -1,0 +1,5 @@
+<script>
+  const animacoes = document.getAnimations();
+  animacoes.forEach((a) => a.pause());
+  window.__iniciar = () => animacoes.forEach((a) => { a.currentTime = 0; a.play(); });
+</script>
