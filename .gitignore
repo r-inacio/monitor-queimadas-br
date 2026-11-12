@@ -1,3 +1,4 @@
 # Arquivos de trabalho locais (dados brutos do INPE em cache e cache do npm)
 .cache-historico/
 .cache-npm/
+.relatorio-trabalho/
