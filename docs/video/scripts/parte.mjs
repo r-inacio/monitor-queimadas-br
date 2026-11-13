@@ -26,9 +26,10 @@ for (let i = 1; i < secoes.length; i += 2) falas[String(secoes[i]).padStart(2, "
 const fala = falas[numero];
 if (!fala) throw new Error(`parte ${numero} não encontrada no roteiro`);
 const palavras = fala.split(/\s+/).filter(Boolean).length;
-const duracaoParte = +(palavras / PPM * 60 + 0.6).toFixed(2);
 
 const storyboard = JSON.parse(readFileSync(STORY, "utf8"));
+// duração: calculada pelo texto, salvo se o storyboard definir uma duração própria
+const duracaoParte = +(storyboard.duracao ?? (palavras / PPM * 60 + 0.6)).toFixed(2);
 const OPACIDADE_ESTADOS = storyboard.estados_opacidade ?? null;
 // storyboard usa frações: converte para segundos fechando exatamente na duração
 const blocos = storyboard.blocos.map((b) => ({ ...b, duracao: +(duracaoParte * (b.fracao ?? 1)).toFixed(3) }));

@@ -35,7 +35,8 @@ def slide_timeline(spec):
   .subtitulo {{ margin-top:28px; font-size:30px; color:#9aa894; line-height:1.5;
     animation:entra .7s .9s ease-out both; }}
   .linha {{ position:absolute; left:869px; top:232px; width:4px; height:{altura_linha}px; background:#f59e0b;
-    opacity:.5; transform-origin:top; animation:cresce {duracao_linha:.2f}s {inicio_linha:.2f}s linear forwards; }}
+    opacity:.5; transform-origin:top; transform:scaleY(0);
+    animation:cresce {duracao_linha:.2f}s {inicio_linha:.2f}s linear forwards; }}
   .no {{ position:absolute; left:840px; width:62px; height:62px; border-radius:50%; background:#f59e0b;
     color:#10140f; font-weight:bold; font-size:30px; display:flex; align-items:center; justify-content:center;
     opacity:0; animation:aparece .45s ease-out forwards; }}

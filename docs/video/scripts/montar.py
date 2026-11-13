@@ -19,7 +19,8 @@ texto = ROTEIRO.read_text(encoding="utf-8")
 secoes = re.split(r"^## Audio (\d+)$", texto, flags=re.M)
 falas = {str(secoes[i]).zfill(2): secoes[i + 1].strip() for i in range(1, len(secoes), 2)}
 palavras = len(falas[numero].split())
-duracao = round(palavras / PPM * 60 + 0.6, 2)
+_story = json.loads(STORY.read_text(encoding="utf-8"))
+duracao = float(_story["duracao"]) if "duracao" in _story else round(palavras / PPM * 60 + 0.6, 2)
 
 story = json.loads(STORY.read_text(encoding="utf-8"))
 FADE = int(story.get("fade", 6))   # 0 = sem fade de entrada
