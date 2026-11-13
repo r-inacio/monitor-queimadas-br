@@ -18,8 +18,9 @@ PPM = 140
 texto = ROTEIRO.read_text(encoding="utf-8")
 secoes = re.split(r"^## Audio (\d+)$", texto, flags=re.M)
 falas = {str(secoes[i]).zfill(2): secoes[i + 1].strip() for i in range(1, len(secoes), 2)}
-palavras = len(falas[numero].split())
 _story = json.loads(STORY.read_text(encoding="utf-8"))
+_texto_parte = falas.get(numero, "")
+palavras = len(_texto_parte.split())
 duracao = float(_story["duracao"]) if "duracao" in _story else round(palavras / PPM * 60 + 0.6, 2)
 
 story = json.loads(STORY.read_text(encoding="utf-8"))

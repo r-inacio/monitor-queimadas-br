@@ -23,11 +23,12 @@ const textoRoteiro = readFileSync(ROTEIRO, "utf8");
 const secoes = textoRoteiro.split(/^## Audio (\d+)$/m);
 const falas = {};
 for (let i = 1; i < secoes.length; i += 2) falas[String(secoes[i]).padStart(2, "0")] = secoes[i + 1].trim();
-const fala = falas[numero];
-if (!fala) throw new Error(`parte ${numero} não encontrada no roteiro`);
-const palavras = fala.split(/\s+/).filter(Boolean).length;
-
 const storyboard = JSON.parse(readFileSync(STORY, "utf8"));
+const fala = falas[numero];
+if (!fala && storyboard.duracao == null) {
+  throw new Error(`parte ${numero} não está no roteiro e o storyboard não define duração`);
+}
+const palavras = fala ? fala.split(/\s+/).filter(Boolean).length : 0;
 // duração: calculada pelo texto, salvo se o storyboard definir uma duração própria
 const duracaoParte = +(storyboard.duracao ?? (palavras / PPM * 60 + 0.6)).toFixed(2);
 const OPACIDADE_ESTADOS = storyboard.estados_opacidade ?? null;
@@ -179,6 +180,9 @@ const injetarOverlay = async () => {
       + '.grafico-historico__estatisticas li{transition:background .22s ease, outline-color .22s ease, transform .22s ease}'
       + '.grafico-historico__estatisticas li:hover{outline:3px solid #f59e0b;outline-offset:6px;'
       + 'background:rgba(245,158,11,.14);border-radius:12px;transform:translateY(-2px)}'
+      + '.ultimo-foco,section.cards,section.bloco{transition:outline-color .2s ease,background .2s ease}'
+      + '.ultimo-foco:hover,section.cards:hover,section.bloco:hover'
+      + '{outline:3px solid #f59e0b;outline-offset:6px;border-radius:12px;background:rgba(245,158,11,.10)}'
       + ${JSON.stringify(OPACIDADE_ESTADOS === null ? "" :
           `.leaflet-estados-pane path{fill-opacity:${OPACIDADE_ESTADOS} !important;`
           + `stroke-opacity:${OPACIDADE_ESTADOS < 0.2 ? 0.85 : 0.5} !important;`
@@ -289,6 +293,49 @@ const ACOES = {
       await clicarTexto(".cidades__item", "PORTEL");
       await esperar(1600);
       await passeio(pt(300, 470), pt(780, 400), 10, 130);
+    },
+  },
+  "aba-hoje-secoes": {
+    // destaca cada seção da aba Hoje, em sequência, até o detalhamento (sem o CSV)
+    preparar: async () => {
+      await ir(`${BASE}/?visao=dashboard&data=2026-10-28`);
+      await esperar(1200);
+      await esperarDados();
+      await injetarOverlay();
+      await esperar(600);
+    },
+    durante: async (dur) => {
+      const caixaSel = (sel, i = 0) => js(`(() => {
+        const e = document.querySelectorAll(${JSON.stringify(sel)})[${i}];
+        if (!e) return null;
+        const r = e.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+      })()`);
+      const irPara = async (ponto, pausa = 2000, passos = 6) => {
+        if (!ponto) return;
+        await passeio(ponto, ponto, 1, 80);         // garante hover no alvo
+        await esperar(pausa);
+      };
+      // 1) último foco registrado
+      await irPara(await caixaSel(".ultimo-foco"), 2200);
+      // 2) cartões de resumo
+      await irPara(await caixaSel("section.cards"), 2400);
+      // 3) focos por estado
+      await irPara(await caixaSel("section.bloco--estado"), 2400);
+      // 4) focos por bioma
+      await irPara(await caixaSel("section.bloco--ajustado", 0), 2200);
+      // 5) focos por satélite
+      await irPara(await caixaSel("section.bloco--ajustado", 1), 2200);
+      // 6) top 15 municípios
+      await irPara(await caixaSel("section.bloco--top15"), 2600);
+      // 7) detalhamento paginado
+      const detalhe = await caixaSel("section.bloco--cheio");
+      if (detalhe) {
+        await passeio(detalhe, detalhe, 1, 80);
+        await esperar(1200);
+        await rolar(220);                            // mostra a paginação
+        await esperar(1600);
+      }
     },
   },
   "dashboard-intro": {
@@ -447,6 +494,79 @@ const ACOES = {
         await passeio({ x: exportar.x - 120, y: exportar.y + 90 }, exportar, 7, 160);
         await esperar(900);
       }
+    },
+  },
+  "filtro-aplicado": {
+    // complemento da parte 17: o clique em "Filtrar por este município" (mesmo dia, Uruará)
+    preparar: async () => {
+      await ir(`${BASE}/?visao=mapa&data=2026-10-28&estado=PARÁ&municipio=URUARÁ`);
+      await esperar(1400);
+      await esperarDados();
+      await injetarOverlay();
+      await esperar(400);
+    },
+    durante: async (dur) => {
+      const pontosDeFoco = () => js(`(() => {
+        const saida = [];
+        for (const e of document.querySelectorAll('.leaflet-overlay-pane path')) {
+          const r = e.getBoundingClientRect();
+          if (r.width < 3 || r.width > 40) continue;
+          const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + r.height / 2);
+          if (x < 380 || x > 1880 || y < 30 || y > 1040) continue;
+          const topo = document.elementFromPoint(x, y);
+          if (topo && (topo === e || e.contains(topo))) saida.push({ x, y });
+        }
+        return saida;
+      })()`);
+      const contador = () => js(`(() => {
+        const p = [...document.querySelectorAll('aside p')].find(e => /filtrados de/i.test(e.textContent));
+        return p ? p.textContent.replace(/\s+/g, ' ').trim() : null;
+      })()`);
+      // 1) visão densa do município (mesma cena da parte 17)
+      const agrupamento = await caixaDe(".marker-cluster");
+      if (agrupamento) {
+        await passeio({ x: agrupamento.x - 50, y: agrupamento.y - 35 }, { x: agrupamento.x, y: agrupamento.y }, 4, 180);
+        await clicarEm(agrupamento.x, agrupamento.y);
+        await esperar(2000);
+      }
+      await passeio({ x: 950, y: 350 }, { x: 1180, y: 500 }, 5, 180);
+      // 2) abre o popup de um foco
+      const pontos = await pontosDeFoco();
+      const centro = { x: 1100, y: 520 };
+      const ordenados = pontos.sort((a, b) =>
+        (Math.abs(a.x - centro.x) + Math.abs(a.y - centro.y)) - (Math.abs(b.x - centro.x) + Math.abs(b.y - centro.y)));
+      let abriu = false;
+      for (const alvo of ordenados.slice(0, 3)) {
+        await passeio({ x: alvo.x - 55, y: alvo.y - 40 }, alvo, 3, 190);
+        await clicarEm(alvo.x, alvo.y);
+        await esperar(1400);
+        abriu = await js(`!!document.querySelector('.leaflet-popup')`);
+        if (abriu) break;
+      }
+      const rotulo = await js(`(document.querySelector('.leaflet-popup-content')?.textContent || '').slice(0, 40)`);
+      console.log("popup:", rotulo, "| antes:", await contador());
+      await esperar(800);
+      // 3) clique em "Filtrar por este município" (com pausa antes e depois)
+      const botao = await js(`(() => {
+        const b = [...document.querySelectorAll('button')].find(e => /Filtrar por este munic/i.test(e.textContent));
+        if (!b) return null;
+        const r = b.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      })()`);
+      if (botao) {
+        await passeio({ x: botao.x - 90, y: botao.y - 60 }, botao, 4, 210);
+        await esperar(900);                       // pausa para o botão em destaque
+        await clicarEm(botao.x, botao.y);
+        await esperar(2600);                      // aplica o filtro e re-renderiza
+      }
+      console.log("depois:", await contador());
+      // 4) estado final: cidade no painel + mapa com os focos do município
+      const cidade = await caixaDe(".cidades__item");
+      if (cidade) {
+        await passeio({ x: cidade.x + 70, y: cidade.y }, { x: cidade.x - 40, y: cidade.y }, 4, 230);
+        await esperar(500);
+      }
+      await passeio({ x: 780, y: 380 }, { x: 1010, y: 490 }, 5, 220);
     },
   },
   "resultado-agregados": {
